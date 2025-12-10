@@ -1,110 +1,76 @@
-import os
-import streamlit as st
-from langchain_ollama import OllamaLLM
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+"""
+Main Streamlit application for RAG Chatbot.
+"""
 
-# Import the function, not the variable
-from vector import get_retriever
+import streamlit as st
+
+from config import PAGE_TITLE, PAGE_ICON
+from llm.chain import create_chain, format_chat_history
+from ui.ui import (
+    render_sidebar,
+    initialize_chat_history,
+    display_chat_history,
+    get_user_input,
+    display_user_message,
+    get_assistant_message_placeholder
+)
+
 
 # --- Page Config ---
-st.set_page_config(page_title="RAG Chatbot", page_icon="🤖")
-st.title("🤖 Chat with your Data")
+st.set_page_config(page_title=PAGE_TITLE, page_icon=PAGE_ICON)
+st.title(f"{PAGE_ICON} Chat with your Data")
 
-# --- Sidebar: File Upload ---
-with st.sidebar:
-    st.header("📂 Manage Knowledge")
-    uploaded_files = st.file_uploader(
-        "Upload PDF or TXT", 
-        type=["pdf", "txt"], 
-        accept_multiple_files=True
-    )
-    
-    if uploaded_files:
-        # 1. FIX: Get the absolute path where app.py is located
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # 2. FIX: Point to the 'data' folder inside that specific directory
-        data_dir = os.path.join(script_dir, "data")
-        
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
-            
-        for uploaded_file in uploaded_files:
-            # 3. FIX: Save using the absolute path
-            file_path = os.path.join(data_dir, uploaded_file.name)
-            
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
-            # Debugging: Print to UI so you know exactly where it went
-            st.success(f"Saved to: {file_path}")
-            
-    # Button to reload the vector database
-    if st.button("🔄 Refresh Knowledge Base"):
-        st.cache_resource.clear()
-        st.success("Knowledge base refreshed!")
+# --- Render Sidebar ---
+render_sidebar()
 
-# --- 1. Setup Chain (Cached) ---
+# --- Setup Chain (Cached) ---
 @st.cache_resource
-def get_chain():
-    # Load the retriever (this might take a moment if creating a new DB)
-    retriever = get_retriever()
+def get_cached_chain(chat_history):
+    """Get the cached RAG chain with chat history."""
+    return create_chain(chat_history)
+
+
+# Load the chain - refresh if documents were updated
+if st.session_state.get("documents_updated", False):
+    st.cache_resource.clear()
+    st.session_state.documents_updated = False
+
+# Format chat history for the chain
+chat_history = format_chat_history(st.session_state.get("messages", []))
+chain = get_cached_chain(chat_history)
+
+if chain is None:
+    st.warning("⚠️ No documents found. Please upload some PDFs or TXT files to get started.")
+else:
+    st.info("✅ Knowledge base is ready. Ask your questions!")
+
+# --- Chat Interface ---
+initialize_chat_history()
+display_chat_history()
+
+if question := get_user_input():
+    display_user_message(question)
     
-    if not retriever:
-        return None
-
-    llm = OllamaLLM(model="llama3.2")
-    
-    template = """
-    You are a helpful assistant. Use the provided context to answer the question.
-    If the answer is not in the context, simply say you don't know.
-    
-    Context:
-    {context}
-    
-    Question: {question}
-    """
-    prompt = ChatPromptTemplate.from_template(template)
-    
-    def format_docs(docs):
-        return "\n\n".join(doc.page_content for doc in docs)
-
-    chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
-    return chain
-
-# Load the chain
-chain = get_chain()
-
-# --- 2. Chat Interface ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-if question := st.chat_input("Ask a question about your documents..."):
-    st.session_state.messages.append({"role": "user", "content": question})
-    with st.chat_message("user"):
-        st.markdown(question)
-
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         
         if chain:
-            message_placeholder.markdown("Thinking...")
-            try:
-                response = chain.invoke(question)
-                message_placeholder.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-            except Exception as e:
-                message_placeholder.error(f"Error: {e}")
+            # Update chat history before generating response
+            chat_history = format_chat_history(st.session_state.messages)
+            # Create a fresh chain with updated history
+            current_chain = create_chain(chat_history)
+            
+            if current_chain:
+                full_response = ""
+                for chunk in current_chain.stream(question):
+                    full_response += chunk
+                    message_placeholder.markdown(full_response + "▌")
+                message_placeholder.markdown(full_response)
+            else:
+                full_response = "Error: No chain available"
+                message_placeholder.error("Chain not available. Please upload documents first.")
         else:
-            message_placeholder.error("Please upload a document to the sidebar first.")
+            full_response = "Error: No chain available"
+            message_placeholder.error("Chain not available. Please upload documents first.")
+        
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
