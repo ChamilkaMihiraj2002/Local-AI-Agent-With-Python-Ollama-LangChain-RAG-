@@ -103,9 +103,11 @@ Before you begin, ensure you have the following installed:
 ```
 
 ### Key Directories Explained
-
 - **App/**: Contains the entire Streamlit application
 - **App/data/**: Where uploaded PDF and TXT files are stored
 - **App/db/**: Vector database storage for embeddings
 - **App/llm/**: LLM chain logic and RAG implementation
 - **App/ui/**: UI components and Streamlit interface logic
+
+<img width="1408" height="748" alt="Screenshot 2025-12-10 at 6 03 29 PM" src="https://github.com/user-attachments/assets/57d92a1a-74b8-4acf-bba8-3536015ab5ca" />
+<img width="1402" height="738" alt="Screenshot 2025-12-10 at 6 10 04 PM" src="https://github.com/user-attachments/assets/0ac20e98-565a-40f1-bfe9-d5bf426d2d54" />
