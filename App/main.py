@@ -1,32 +1,64 @@
-from langchain_ollama.llms import OllamaLLM
+from langchain_ollama import OllamaLLM
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+
+# Import the retriever we created in vector.py
 from vector import retriever
 
-model = OllamaLLM(model="llama3.2")
+def main():
+    if not retriever:
+        print("System could not start. Check vector.py logs.")
+        return
 
-template = """
-    You are an expert in aswering questions about a pizza restaurant
+    # 1. Setup LLM
+    model = OllamaLLM(model="llama3.2")
 
-    Here are some relevent reviews: {reviews}
+    # 2. Setup Generic Prompt
+    # We replaced specific references to "pizza" or "reviews" with "Context"
+    template = """
+    You are a helpful assistant. Use the provided context to answer the question.
+    If the answer is not in the context, simply say you don't know.
     
-    Here is a question to answer: {question}
-"""
-
-prompt = ChatPromptTemplate.from_template(template)
-chain = prompt | model
-
-
-while True:
-    print("\n\n------------------------------------------------------------------------------------\n ")
-    question = input("Enter your question about the pizza restaurant (or 'q' to quit): ")
-    print("\n\n ")
-    if question.lower() == 'q':
-        break
+    Context:
+    {context}
     
-    reviews = retriever.invoke(question)
-    results = chain.invoke({
-        "reviews": reviews,
-        "question": question
-    })
+    Question: {question}
+    """
+    
+    prompt = ChatPromptTemplate.from_template(template)
 
-    print(results)
+    # 3. Build Chain
+    # Helper function to join retrieved documents into a single string
+    def format_docs(docs):
+        return "\n\n".join(doc.page_content for doc in docs)
+
+    chain = (
+        {"context": retriever | format_docs, "question": RunnablePassthrough()}
+        | prompt
+        | model
+        | StrOutputParser()
+    )
+
+    # 4. Chat Loop
+    print("\n--- RAG System Ready ---")
+    print("Ask questions about the files in your 'data' folder.")
+    
+    while True:
+        print("\n---------------------------------------------------------")
+        question = input("Enter your question (or 'q' to quit): ")
+        
+        if question.lower() == 'q':
+            print("Exiting...")
+            break
+        
+        print("\nThinking...")
+        try:
+            response = chain.invoke(question)
+            print("\nResponse:")
+            print(response)
+        except Exception as e:
+            print(f"Error processing request: {e}")
+
+if __name__ == "__main__":
+    main()
